@@ -166,23 +166,8 @@
 <div id="toast-root" aria-live="polite"></div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-
-  /* ---------------------------------------------------------
-     Firebase setup — project: bijoy-tower-7cc9e
-  --------------------------------------------------------- */
-  var firebaseConfig = {
-    apiKey: "AIzaSyDqS9etwE6YJ2y0czBYplyc5U2Iw0TE2_M",
-    authDomain: "bijoy-tower-7cc9e.firebaseapp.com",
-    projectId: "bijoy-tower-7cc9e",
-    storageBucket: "bijoy-tower-7cc9e.firebasestorage.app",
-    messagingSenderId: "334004250505",
-    appId: "1:334004250505:web:dd4d6f89421ce418f0a358"
-  };
-  var fbApp = initializeApp(firebaseConfig);
-  var db = getFirestore(fbApp);
-  var stateDocRef = doc(db, "khata", "state");
+  var STORAGE_KEY = "bijoytower.local.v1";
+  var savedSnapshot = null;
 
   /* ---------------------------------------------------------
      Constants
@@ -252,7 +237,7 @@
   }
 
   /* ---------------------------------------------------------
-     STATE (from Firestore) + ephemeral UI
+     Local records + ephemeral UI
   --------------------------------------------------------- */
   var STATE = null;
   var stateLoaded = false;
@@ -260,7 +245,7 @@
 
   var UI = {
     session: null,
-    loginMode: "resident",
+    loginMode: "admin",
     loginErr: "",
     phoneInput: "",
     month: currentMonth(),
@@ -271,29 +256,97 @@
   var draftFlat = null;
 
   /* ---------------------------------------------------------
-     Persistence (Firestore)
+     Browser storage and portable backups
   --------------------------------------------------------- */
-  function persist(){
-    setDoc(stateDocRef, STATE).then(function(){
-      showToast("ok","সংরক্ষণ করা হয়েছে।");
-    }).catch(function(err){
-      showToast("error","সংরক্ষণ ব্যর্থ হয়েছে: " + (err && err.message ? err.message : "আবার চেষ্টা করুন।"));
+  function emptyState(){ return {flats:[], entries:[], pin:null}; }
+  function validateState(data){
+    if(!data || !Array.isArray(data.flats) || !Array.isArray(data.entries) ||
+      !(data.pin === null || (typeof data.pin === "string" && data.pin.length >= 4))) throw new Error("ব্যাকআপের তথ্য সঠিক নয়।");
+    var flatIds = new Set(), entryIds = new Set();
+    data.flats.forEach(function(f){
+      if(!f || typeof f.flatNo !== "string" || !f.flatNo.trim() || typeof f.ownerName !== "string" || !f.ownerName.trim() ||
+        typeof f.mobile !== "string" || flatIds.has(f.flatNo)) throw new Error("ফ্ল্যাটের তথ্য সঠিক নয় বা একই নম্বর একাধিকবার আছে।");
+      flatIds.add(f.flatNo);
     });
+    data.entries.forEach(function(e){
+      if(!e || typeof e.id !== "string" || !e.id || entryIds.has(e.id) || !["income","cost"].includes(e.type) ||
+        typeof e.category !== "string" || !e.category.trim() || !Number.isFinite(e.amount) || e.amount <= 0 ||
+        typeof e.month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(e.month) ||
+        typeof e.flatNo !== "string" || typeof e.note !== "string") throw new Error("লেনদেনের তথ্য সঠিক নয়।");
+      entryIds.add(e.id);
+    });
+    return {flats:data.flats.map(function(f){ return {flatNo:f.flatNo, ownerName:f.ownerName, mobile:f.mobile}; }),
+      entries:data.entries.map(function(e){ return {id:e.id,type:e.type,category:e.category,amount:e.amount,month:e.month,flatNo:e.flatNo,note:e.note}; }), pin:data.pin};
   }
-
-  onSnapshot(stateDocRef, function(snap){
-    var data = snap.exists() ? snap.data() : {};
-    STATE = {
-      flats: Array.isArray(data.flats) ? data.flats : [],
-      entries: Array.isArray(data.entries) ? data.entries : [],
-      pin: data.pin === undefined ? null : data.pin
-    };
-    stateLoaded = true;
-    stateError = null;
-    renderApp();
-  }, function(err){
-    stateError = (err && err.message) ? err.message : "ডাটা লোড করা যায়নি।";
-    renderApp();
+  function readRecords(raw){
+    var record = JSON.parse(raw);
+    if(!record || record.app !== "bijoytower" || record.version !== 1) throw new Error("এটি ভবন খতিয়ানের উপযুক্ত ব্যাকআপ নয়।");
+    return validateState(record.data);
+  }
+  function encodeRecords(data){
+    return JSON.stringify({app:"bijoytower",version:1,savedAt:new Date().toISOString(),data:validateState(data)}, null, 2);
+  }
+  function loadLocal(){
+    try {
+      savedSnapshot = localStorage.getItem(STORAGE_KEY);
+      STATE = savedSnapshot === null ? emptyState() : readRecords(savedSnapshot);
+      stateLoaded = true;
+      stateError = null;
+    } catch(err){ stateError = "এই ব্রাউজারের সংরক্ষিত তথ্য পড়া যাচ্ছে না। ব্রাউজারের ডাটা মুছবেন না। " + err.message; }
+  }
+  function persist(){
+    try {
+      if(localStorage.getItem(STORAGE_KEY) !== savedSnapshot) throw new Error("অন্য ট্যাবে তথ্য পরিবর্তিত হয়েছে। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।");
+      var next = encodeRecords(STATE);
+      localStorage.setItem(STORAGE_KEY, next);
+      savedSnapshot = next;
+      showToast("ok","এই ব্রাউজারে সংরক্ষণ করা হয়েছে।");
+      return true;
+    } catch(err){
+      STATE = savedSnapshot === null ? emptyState() : readRecords(savedSnapshot);
+      if(STATE.pin === null) UI.session = null;
+      renderApp();
+      showToast("error","সংরক্ষণ হয়নি: " + err.message);
+      return false;
+    }
+  }
+  function downloadBackup(){
+    var url = URL.createObjectURL(new Blob([encodeRecords(STATE)], {type:"application/json;charset=utf-8"}));
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "bijoytower-backup-" + new Date().toISOString().slice(0,10) + ".json";
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+  async function restoreBackup(file){
+    if(!file) return;
+    try {
+      if(file.size > 5 * 1024 * 1024) throw new Error("ব্যাকআপ ফাইলটি ৫ মেগাবাইটের বেশি।");
+      var restored = readRecords(await file.text());
+      if(!confirm(restored.flats.length + "টি ফ্ল্যাট ও " + restored.entries.length + "টি লেনদেন ফিরিয়ে আনবেন? বর্তমান তথ্য প্রতিস্থাপিত হবে। আগে বর্তমান ব্যাকআপ ডাউনলোড করে রাখুন।")) return;
+      STATE = restored;
+      if(persist()){
+        UI.session = null; UI.modal = null; UI.loginMode = "admin"; UI.loginErr = ""; stateError = null; stateLoaded = true;
+        renderApp();
+        showToast("ok","ব্যাকআপ ফিরিয়ে আনা হয়েছে। ব্যাকআপের পিন দিয়ে প্রবেশ করুন।");
+      }
+    } catch(err){ showToast("error", "ব্যাকআপ ফিরিয়ে আনা যায়নি: " + err.message); }
+  }
+  function renderLocalTools(canBackup){
+    return '<div class="notice"><strong>এই ব্রাউজারে সংরক্ষিত</strong><p class="hint">অন্য ফোন বা কম্পিউটারে তথ্য নিজে থেকে যাবে না। ব্রাউজারের ডাটা মুছলে হিসাব হারাতে পারেন—নিয়মিত ব্যাকআপ রাখুন। ব্যাকআপে মোবাইল নম্বর ও পিন থাকে, নিজের কাছে রাখুন।</p><div class="toolbar-actions" style="margin-top:10px">'+
+      (canBackup ? '<button type="button" class="btn-ghost" data-action="backup">ব্যাকআপ ডাউনলোড</button>' : '')+
+      '<label class="btn-ghost" style="flex-wrap:wrap;max-width:100%">ব্যাকআপ ফিরিয়ে আনুন<input type="file" id="restore-backup" accept=".json,application/json" style="width:180px;max-width:100%" aria-label="ব্যাকআপ ফাইল নির্বাচন করুন"></label></div></div>';
+  }
+  function wireLocalTools(){
+    var button = document.querySelector('[data-action="backup"]');
+    if(button) button.addEventListener("click", downloadBackup);
+    var input = document.getElementById("restore-backup");
+    if(input) input.addEventListener("change", function(){ var file = input.files[0]; input.value = ""; restoreBackup(file); });
+  }
+  window.addEventListener("storage", function(event){
+    if(event.key !== STORAGE_KEY && event.key !== null) return;
+    loadLocal(); UI.session = null; UI.modal = null; renderApp();
+    showToast("ok", "অন্য ট্যাবে তথ্য পরিবর্তিত হয়েছে। আবার প্রবেশ করুন।");
   });
 
   function showToast(kind, msg){
@@ -440,7 +493,7 @@
         '<label class="field">আপনার মোবাইল নম্বর<input type="tel" inputmode="numeric" id="phone-input" placeholder="01XXXXXXXXX" value="'+esc(UI.phoneInput)+'" autofocus></label>'+
         (UI.loginErr ? '<div class="err">'+esc(UI.loginErr)+'</div>' : '')+
         '<button type="submit" class="btn-primary">দেখুন</button>'+
-        '<p class="hint">ফ্ল্যাটের রেজিস্টার্ড নম্বর দিয়ে লগইন করলে আপনি বিল্ডিং-এর মাসভিত্তিক আয়-ব্যয়ের হিসাব দেখতে পাবেন।</p>'+
+        '<p class="hint">এই ব্রাউজারে যোগ করা ফ্ল্যাটের নম্বর দিয়ে এখানকার হিসাব দেখুন। অন্য ডিভাইসের তথ্য এখানে নিজে থেকে আসবে না।</p>'+
         '</form>';
     } else {
       body += '<form id="admin-login-form" class="login-form">'+
@@ -451,7 +504,8 @@
         '<button type="submit" class="btn-primary">'+(needsSetup?"পিন সেট করুন":"প্রবেশ করুন")+'</button>'+
         '</form>';
     }
-    body += '</div><p class="footnote">তথ্য সবার জন্য শেয়ার করা — এটি একটি সাধারণ (নন-এনক্রিপ্টেড) স্বচ্ছতা টুল, ব্যাংকিং-গ্রেড নিরাপত্তা নয়।</p></div>';
+    if(needsSetup) body += '<div style="margin-top:16px">'+renderLocalTools(false)+'</div>';
+    body += '</div><p class="footnote">তথ্য শুধু এই ব্রাউজারে থাকে। পিনটি সাধারণ প্রবেশ নিয়ন্ত্রণ, ডাটা এনক্রিপশন নয়।</p></div>';
     return body;
   }
 
@@ -507,7 +561,7 @@
     var tab = UI.adminTab;
     var body = '<div class="app-shell">'+
       renderTopBar("ভবন খতিয়ান — ক্যাশিয়ার প্যানেল", null, true)+
-      '<div class="content">'+
+      '<div class="content">'+renderLocalTools(true)+
       '<div class="tab-switch wide">'+
         '<button data-action="set-admin-tab" data-tab="overview" class="'+(tab==="overview"?"active":"")+'">'+icon("book",15)+' সারসংক্ষেপ</button>'+
         '<button data-action="set-admin-tab" data-tab="ledger" class="'+(tab==="ledger"?"active":"")+'">'+icon("shield",15)+' খতিয়ান</button>'+
@@ -625,6 +679,7 @@
      Event wiring
   --------------------------------------------------------- */
   function wireLoginEvents(){
+    wireLocalTools();
     var root = document.getElementById("app-root");
     root.querySelectorAll('[data-action="set-login-mode"]').forEach(function(btn){
       btn.addEventListener("click", function(){
@@ -704,6 +759,7 @@
   }
 
   function wireAdminEvents(){
+    wireLocalTools();
     var root = document.getElementById("app-root");
     root.querySelectorAll('[data-action="set-admin-tab"]').forEach(function(btn){
       btn.addEventListener("click", function(){
@@ -825,7 +881,7 @@
     var d = draftEntry;
     var finalCategory = d.useCustom ? (d.customCategory||"").trim() : d.category;
     var amt = Number(d.amount);
-    if(!finalCategory || !amt || amt <= 0){
+    if(!finalCategory || !Number.isFinite(amt) || amt <= 0){
       showToast("error","খাত ও সঠিক পরিমাণ দিন।");
       return;
     }
@@ -893,7 +949,8 @@
     persist();
   }
 
-  /* boot: renderApp() is called by the onSnapshot callback once data arrives */
+  loadLocal();
+  renderApp();
 </script>
 </body>
 </html>
