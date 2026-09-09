@@ -30,6 +30,10 @@ async function start({port = Number(process.env.PORT || 3000), dataDir = path.jo
         res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache'});
         return res.end(await fs.readFile(path.join(__dirname, 'index.html')));
       }
+      if(req.method==='GET' && ['/app.js','/style.css','/accounting.js'].includes(url.pathname)){
+        res.writeHead(200, {'Content-Type':url.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8','Cache-Control':'no-cache'});
+        return res.end(await fs.readFile(path.join(__dirname,'web',url.pathname.slice(1))));
+      }
       res.writeHead(404); res.end('Not found');
     } catch { res.writeHead(500); res.end('Server error'); }
   });

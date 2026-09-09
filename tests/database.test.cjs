@@ -14,6 +14,7 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   const base = 'http://127.0.0.1:' + server.address().port;
   let cookie = '';
   async function request(body, useCookie = true, extraHeaders = {}) {
+    if(body?.state)body.state.schemaVersion=2;
     const response = await fetch(base + '/api/database', {method: body ? 'POST' : 'GET', headers: {'Content-Type':'application/json', ...(useCookie ? {cookie} : {}), ...extraHeaders}, body: body ? JSON.stringify(body) : undefined});
     if (response.headers.has('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
     return {status:response.status, body:await response.json()};
@@ -53,14 +54,18 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.equal((await request()).body.session, null);
   const resident = await request({action:'login',role:'resident',phone:flats[0].mobile});
   assert.equal(resident.body.session.role, 'resident');
-  assert.equal(resident.body.state.flats.length, 1);
+  assert.equal(resident.body.state.flats.length, 27);
+  assert.equal(resident.body.state.flats.filter(f=>f.mobile).length, 1);
   assert.equal(resident.body.state.entries.length, 27);
   assert.equal((await request({action:'save',revision:2,state:{flats:[],entries:[]}})).status, 403);
   cookie = adminCookie;
-  const concurrent = await Promise.all([request({action:'save',revision:2,state:{flats,entries:[]}}), request({action:'save',revision:2,state:{flats:[],entries}})]);
+  const concurrent = await Promise.all([request({action:'save',revision:2,state:{flats,entries:[]}}), request({action:'save',revision:2,state:{flats,entries}})]);
   assert.deepEqual(concurrent.map(r=>r.status).sort(), [200,409]);
   const html = await (await fetch(base)).text();
-  new vm.Script(html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]);
+  const code=await (await fetch(base+'/app.js')).text();
+  new vm.Script(code);
   assert.doesNotMatch(html, /localStorage|firebase|firestore/i);
-  assert.match(html, /\/api\/database/);
+  assert.match(code, /\/api\/database/);
+  assert.equal((await fetch(base+'/accounting.js')).status,200);
+  assert.equal((await fetch(base+'/style.css')).status,200);
 });
