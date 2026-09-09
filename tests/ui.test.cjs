@@ -23,6 +23,7 @@ test('screens: cashier bills, partial collection, garage, expense, phone edit, b
  w.URL.createObjectURL=blob=>{lastBlob=blob;return 'blob:test';};w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){};
  w.addEventListener('error',event=>errors.push(event.error));
  w.eval(await fs.readFile(path.join(__dirname,'../web/accounting.js'),'utf8'));
+ w.eval(await fs.readFile(path.join(__dirname,'../web/i18n.js'),'utf8'));
  w.eval(await fs.readFile(path.join(__dirname,'../web/app.js'),'utf8'));
  async function until(check){for(let i=0;i<250;i++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,10));}throw new Error('UI condition timed out. '+w.document.body.textContent.slice(-500));}
  const query=selector=>w.document.querySelector(selector);
@@ -32,9 +33,18 @@ test('screens: cashier bills, partial collection, garage, expense, phone edit, b
  const read=async()=>JSON.parse(await fs.readFile(path.join(dataDir,'database.json'),'utf8'));
  async function saved(revision){await until(async()=> (await read()).revision===revision);await until(()=>!query('#busy-layer'));}
  await until(()=>query('#login-form'));
+ assert.ok(w.document.body.textContent.includes('ফ্ল্যাট মালিক'));
+ click('[data-action="language"]');
+ assert.ok(w.document.body.textContent.includes('Flat Owner'));
+ assert.equal(w.localStorage.getItem('bijoytower-language'),'en');
+ click('[data-action="login-mode"][data-mode="admin"]');fill('credential','9999');submit('#login-form');await until(()=>query('#login-error').textContent);assert.equal(query('#login-error').textContent,'The PIN is incorrect.');
+ click('[data-action="language"]');
+ assert.ok(w.document.body.textContent.includes('ফ্ল্যাট মালিক'));
  click('[data-action="login-mode"][data-mode="admin"]');fill('credential','1234');submit('#login-form');
  await until(()=>query('[data-tab="collection"]'));click('[data-tab="collection"]');click('[data-action="generate"]');await saved(1);
  assert.equal((await read()).invoices.length,3);assert.equal((await read()).entries.length,0);
+ click('[data-action="language"]');assert.ok(w.document.body.textContent.includes('Bills & Collections'));assert.ok(w.document.body.textContent.includes('Generate Monthly Bills'));
+ click('[data-action="language"]');assert.ok(w.document.body.textContent.includes('বিল ও আদায়'));
  click('[data-action="generate"]');assert.equal((await read()).revision,1);
  click('[data-action="collect"][data-flat="1A"]');fill('amount','1500');submit('#edit-form');await saved(2);
  let data=await read();assert.equal(A.flatAccount(data,data.flats[0],'2026-01').due,2000);
@@ -46,6 +56,6 @@ test('screens: cashier bills, partial collection, garage, expense, phone edit, b
  click('[data-tab="review"]');click('[data-action="backup"]');const backup=JSON.parse(await lastBlob.text());assert.equal(backup.version,2);assert.equal(backup.data.invoices.length,3);assert.equal(backup.data.entries.length,3);assert.equal(backup.data.auth,undefined);
  click('[data-action="logout"]');await until(()=>query('#login-form'));click('[data-action="login-mode"][data-mode="resident"]');fill('credential','01700000001');submit('#login-form');
  await until(()=>query('[data-tab="collection"]'));assert.equal(query('[data-tab="flats"]'),null);assert.equal(query('[data-tab="review"]'),null);
- click('[data-tab="collection"]');assert.equal(query('[data-action="collect"]'),null);assert.equal(query('tbody').children.length,1);assert.ok(w.document.body.textContent.includes('2,000'));
+ click('[data-tab="collection"]');assert.equal(query('[data-action="collect"]'),null);assert.equal(query('tbody').children.length,1);assert.ok(w.document.body.textContent.includes('২,০০০'));
  assert.deepEqual(errors,[]);
 });

@@ -67,5 +67,6 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.doesNotMatch(html, /localStorage|firebase|firestore/i);
   assert.match(code, /\/api\/database/);
   assert.equal((await fetch(base+'/accounting.js')).status,200);
+  assert.equal((await fetch(base+'/i18n.js')).status,200);
   assert.equal((await fetch(base+'/style.css')).status,200);
 });
