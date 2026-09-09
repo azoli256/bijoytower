@@ -1,0 +1,16 @@
+{
+  "name": "bijoytower",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.cjs",
+    "build": "node scripts/build.cjs",
+    "test": "node --test tests/database.test.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
+  }
+}

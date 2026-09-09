@@ -156,7 +156,8 @@
     .table{min-width:0;}
     .table-head,.table-row{grid-template-columns:48px 1fr 56px 84px;}
     .table-head span:nth-child(5),.table-row span:nth-child(5){display:none;}
-    .table-head span:last-child,.table-row .row-actions{display:none;}
+    .table-row .row-actions{display:flex;grid-column:1 / -1;justify-content:flex-end;}
+    .table-row{overflow-wrap:anywhere;}
   }
 </style>
 </head>
@@ -166,7 +167,7 @@
 <div id="toast-root" aria-live="polite"></div>
 
 <script type="module">
-  var STORAGE_KEY = "bijoytower.local.v1";
+  var serverRevision = 0;
   var savedSnapshot = null;
 
   /* ---------------------------------------------------------
@@ -256,12 +257,12 @@
   var draftFlat = null;
 
   /* ---------------------------------------------------------
-     Browser storage and portable backups
+     Server JSON database and portable backups
   --------------------------------------------------------- */
-  function emptyState(){ return {flats:[], entries:[], pin:null}; }
+  function emptyState(){ return {flats:[], entries:[], pin:"configured"}; }
   function validateState(data){
     if(!data || !Array.isArray(data.flats) || !Array.isArray(data.entries) ||
-      !(data.pin === null || (typeof data.pin === "string" && data.pin.length >= 4))) throw new Error("ব্যাকআপের তথ্য সঠিক নয়।");
+      !(data.pin === undefined || data.pin === null || typeof data.pin === "string")) throw new Error("ব্যাকআপের তথ্য সঠিক নয়।");
     var flatIds = new Set(), entryIds = new Set();
     data.flats.forEach(function(f){
       if(!f || typeof f.flatNo !== "string" || !f.flatNo.trim() || typeof f.ownerName !== "string" || !f.ownerName.trim() ||
@@ -276,7 +277,7 @@
       entryIds.add(e.id);
     });
     return {flats:data.flats.map(function(f){ return {flatNo:f.flatNo, ownerName:f.ownerName, mobile:f.mobile}; }),
-      entries:data.entries.map(function(e){ return {id:e.id,type:e.type,category:e.category,amount:e.amount,month:e.month,flatNo:e.flatNo,note:e.note}; }), pin:data.pin};
+      entries:data.entries.map(function(e){ return {id:e.id,type:e.type,category:e.category,amount:e.amount,month:e.month,flatNo:e.flatNo,note:e.note}; })};
   }
   function readRecords(raw){
     var record = JSON.parse(raw);
@@ -286,29 +287,36 @@
   function encodeRecords(data){
     return JSON.stringify({app:"bijoytower",version:1,savedAt:new Date().toISOString(),data:validateState(data)}, null, 2);
   }
-  function loadLocal(){
-    try {
-      savedSnapshot = localStorage.getItem(STORAGE_KEY);
-      STATE = savedSnapshot === null ? emptyState() : readRecords(savedSnapshot);
-      stateLoaded = true;
-      stateError = null;
-    } catch(err){ stateError = "এই ব্রাউজারের সংরক্ষিত তথ্য পড়া যাচ্ছে না। ব্রাউজারের ডাটা মুছবেন না। " + err.message; }
+  async function api(body){
+    var response = await fetch("/api/database", {method:body ? "POST" : "GET", credentials:"same-origin", cache:"no-store",
+      headers:body ? {"Content-Type":"application/json"} : {}, body:body ? JSON.stringify(body) : undefined});
+    var result;
+    try { result = await response.json(); } catch(err){ throw new Error("সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি।"); }
+    if(!response.ok){ var error = new Error(result.error || "সংযোগ ব্যর্থ হয়েছে।"); error.status = response.status; throw error; }
+    return result;
   }
-  function persist(){
+  function acceptRemote(result){
+    STATE = result.state; serverRevision = result.revision; UI.session = result.session;
+    savedSnapshot = JSON.stringify(STATE); stateLoaded = true; stateError = null;
+  }
+  async function loadRemote(){
+    try { acceptRemote(await api()); } catch(err){ stateError = err.message; }
+    renderApp();
+  }
+  async function persist(){
+    if(UI.saving) return false;
+    UI.saving = true;
+    document.querySelectorAll("button,input,select").forEach(function(el){ el.disabled = true; });
     try {
-      if(localStorage.getItem(STORAGE_KEY) !== savedSnapshot) throw new Error("অন্য ট্যাবে তথ্য পরিবর্তিত হয়েছে। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।");
-      var next = encodeRecords(STATE);
-      localStorage.setItem(STORAGE_KEY, next);
-      savedSnapshot = next;
-      showToast("ok","এই ব্রাউজারে সংরক্ষণ করা হয়েছে।");
+      acceptRemote(await api({action:"save", revision:serverRevision, state:STATE}));
+      showToast("ok","JSON ডাটাবেসে সংরক্ষণ করা হয়েছে।");
       return true;
     } catch(err){
-      STATE = savedSnapshot === null ? emptyState() : readRecords(savedSnapshot);
-      if(STATE.pin === null) UI.session = null;
-      renderApp();
+      STATE = JSON.parse(savedSnapshot);
+      if(err.status === 409 || err.status === 403){ try { acceptRemote(await api()); } catch(ignore){} }
       showToast("error","সংরক্ষণ হয়নি: " + err.message);
       return false;
-    }
+    } finally { UI.saving = false; renderApp(); }
   }
   function downloadBackup(){
     var url = URL.createObjectURL(new Blob([encodeRecords(STATE)], {type:"application/json;charset=utf-8"}));
@@ -319,21 +327,21 @@
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
   }
   async function restoreBackup(file){
-    if(!file) return;
+    if(!file || UI.saving) return;
     try {
-      if(file.size > 5 * 1024 * 1024) throw new Error("ব্যাকআপ ফাইলটি ৫ মেগাবাইটের বেশি।");
+      if(file.size > 3 * 1024 * 1024) throw new Error("ব্যাকআপ ফাইলটি ৩ মেগাবাইটের বেশি।");
       var restored = readRecords(await file.text());
       if(!confirm(restored.flats.length + "টি ফ্ল্যাট ও " + restored.entries.length + "টি লেনদেন ফিরিয়ে আনবেন? বর্তমান তথ্য প্রতিস্থাপিত হবে। আগে বর্তমান ব্যাকআপ ডাউনলোড করে রাখুন।")) return;
       STATE = restored;
-      if(persist()){
-        UI.session = null; UI.modal = null; UI.loginMode = "admin"; UI.loginErr = ""; stateError = null; stateLoaded = true;
+      if(await persist()){
+        UI.modal = null;
         renderApp();
-        showToast("ok","ব্যাকআপ ফিরিয়ে আনা হয়েছে। ব্যাকআপের পিন দিয়ে প্রবেশ করুন।");
+        showToast("ok","ব্যাকআপ ফিরিয়ে আনা হয়েছে। ক্যাশিয়ারের পিন অপরিবর্তিত আছে।");
       }
     } catch(err){ showToast("error", "ব্যাকআপ ফিরিয়ে আনা যায়নি: " + err.message); }
   }
   function renderLocalTools(canBackup){
-    return '<div class="notice"><strong>এই ব্রাউজারে সংরক্ষিত</strong><p class="hint">অন্য ফোন বা কম্পিউটারে তথ্য নিজে থেকে যাবে না। ব্রাউজারের ডাটা মুছলে হিসাব হারাতে পারেন—নিয়মিত ব্যাকআপ রাখুন। ব্যাকআপে মোবাইল নম্বর ও পিন থাকে, নিজের কাছে রাখুন।</p><div class="toolbar-actions" style="margin-top:10px">'+
+    return '<div class="notice"><strong>সংযুক্ত JSON ডাটাবেস</strong><p class="hint">ফ্ল্যাট ও হিসাব সার্ভারে সংরক্ষিত হচ্ছে। নিয়মিত ব্যাকআপ ডাউনলোড করে নিজের কাছে রাখুন।</p><div class="toolbar-actions" style="margin-top:10px">'+
       (canBackup ? '<button type="button" class="btn-ghost" data-action="backup">ব্যাকআপ ডাউনলোড</button>' : '')+
       '<label class="btn-ghost" style="flex-wrap:wrap;max-width:100%">ব্যাকআপ ফিরিয়ে আনুন<input type="file" id="restore-backup" accept=".json,application/json" style="width:180px;max-width:100%" aria-label="ব্যাকআপ ফাইল নির্বাচন করুন"></label></div></div>';
   }
@@ -343,11 +351,6 @@
     var input = document.getElementById("restore-backup");
     if(input) input.addEventListener("change", function(){ var file = input.files[0]; input.value = ""; restoreBackup(file); });
   }
-  window.addEventListener("storage", function(event){
-    if(event.key !== STORAGE_KEY && event.key !== null) return;
-    loadLocal(); UI.session = null; UI.modal = null; renderApp();
-    showToast("ok", "অন্য ট্যাবে তথ্য পরিবর্তিত হয়েছে। আবার প্রবেশ করুন।");
-  });
 
   function showToast(kind, msg){
     var root = document.getElementById("toast-root");
@@ -493,7 +496,7 @@
         '<label class="field">আপনার মোবাইল নম্বর<input type="tel" inputmode="numeric" id="phone-input" placeholder="01XXXXXXXXX" value="'+esc(UI.phoneInput)+'" autofocus></label>'+
         (UI.loginErr ? '<div class="err">'+esc(UI.loginErr)+'</div>' : '')+
         '<button type="submit" class="btn-primary">দেখুন</button>'+
-        '<p class="hint">এই ব্রাউজারে যোগ করা ফ্ল্যাটের নম্বর দিয়ে এখানকার হিসাব দেখুন। অন্য ডিভাইসের তথ্য এখানে নিজে থেকে আসবে না।</p>'+
+        '<p class="hint">ফ্ল্যাটের রেজিস্টার্ড মোবাইল নম্বর দিয়ে ভবনের হিসাব দেখুন। হিসাব পরিবর্তন করতে ক্যাশিয়ারের পিন প্রয়োজন।</p>'+
         '</form>';
     } else {
       body += '<form id="admin-login-form" class="login-form">'+
@@ -505,7 +508,7 @@
         '</form>';
     }
     if(needsSetup) body += '<div style="margin-top:16px">'+renderLocalTools(false)+'</div>';
-    body += '</div><p class="footnote">তথ্য শুধু এই ব্রাউজারে থাকে। পিনটি সাধারণ প্রবেশ নিয়ন্ত্রণ, ডাটা এনক্রিপশন নয়।</p></div>';
+    body += '</div><p class="footnote">ভবনের হিসাব সংযুক্ত JSON ডাটাবেসে সংরক্ষিত থাকে। ক্যাশিয়ারের পিন নিজের কাছে রাখুন।</p></div>';
     return body;
   }
 
@@ -535,7 +538,7 @@
     var rows = flats.length === 0
       ? '<div class="empty-row">এখনো কোনো ফ্ল্যাট যোগ করা হয়নি।</div>'
       : '<div class="table">'+
-          '<div class="table-head"><span>ফ্ল্যাট নং</span><span>মালিকের নাম</span><span>মোবাইল নম্বর</span><span></span></div>'+
+          '<div class="table-head" style="grid-template-columns:90px 1.6fr 1.2fr 60px;"><span>ফ্ল্যাট নং</span><span>মালিকের নাম</span><span>মোবাইল নম্বর</span><span></span></div>'+
           flats.map(function(f){
             return '<div class="table-row" style="grid-template-columns:90px 1.6fr 1.2fr 60px;">'+
               '<span class="tabular">'+esc(f.flatNo)+'</span>'+
@@ -642,7 +645,8 @@
   function renderApp(){
     var root = document.getElementById("app-root");
     if(stateError){
-      root.innerHTML = '<div class="loading-wrap">ডাটা লোড করা যায়নি: '+esc(stateError)+'</div>';
+      root.innerHTML = '<div class="loading-wrap" style="flex-direction:column;gap:16px;padding:20px"><span>ডাটা লোড করা যায়নি: '+esc(stateError)+'</span><button class="btn-primary" id="retry-load">আবার চেষ্টা করুন</button></div>';
+      document.getElementById('retry-load').addEventListener('click', loadRemote);
       return;
     }
     if(!stateLoaded){
@@ -690,50 +694,26 @@
     });
     var residentForm = document.getElementById("resident-login-form");
     if(residentForm){
-      residentForm.addEventListener("submit", function(e){
+      residentForm.addEventListener("submit", async function(e){
         e.preventDefault();
         var val = document.getElementById("phone-input").value;
         UI.phoneInput = val;
-        var norm = normalizePhone(val);
-        var flat = STATE.flats.find(function(f){ return normalizePhone(f.mobile) === norm && norm.length >= 6; });
-        if(!flat){
-          UI.loginErr = "এই নম্বরটি কোনো ফ্ল্যাটের সাথে যুক্ত নেই। ক্যাশিয়ারের সাথে যোগাযোগ করুন।";
-          renderApp();
-          return;
-        }
-        UI.loginErr = "";
-        UI.session = {role:"resident", flat: flat};
+        var submit = residentForm.querySelector('button[type="submit"]'); submit.disabled = true;
+        try { acceptRemote(await api({action:"login", role:"resident", phone:val})); UI.loginErr = ""; }
+        catch(err){ UI.loginErr = err.message; }
         UI.month = currentMonth();
         renderApp();
       });
     }
     var adminForm = document.getElementById("admin-login-form");
     if(adminForm){
-      adminForm.addEventListener("submit", function(e){
+      adminForm.addEventListener("submit", async function(e){
         e.preventDefault();
-        var needsSetup = STATE.pin === null;
         var pin = document.getElementById("pin-input").value;
-        if(needsSetup){
-          var pin2 = document.getElementById("pin-input-2").value;
-          if(pin.length < 4){ UI.loginErr = "অন্তত ৪ ডিজিটের একটি পিন দিন।"; renderApp(); return; }
-          if(pin !== pin2){ UI.loginErr = "দুটি পিন মিলছে না।"; renderApp(); return; }
-          STATE.pin = pin;
-          UI.loginErr = "";
-          UI.session = {role:"admin"};
-          UI.month = currentMonth();
-          persist();
-          renderApp();
-          return;
-        }
-        if(pin === STATE.pin){
-          UI.loginErr = "";
-          UI.session = {role:"admin"};
-          UI.month = currentMonth();
-          renderApp();
-        } else {
-          UI.loginErr = "পিন সঠিক নয়।";
-          renderApp();
-        }
+        var submit = adminForm.querySelector('button[type="submit"]'); submit.disabled = true;
+        try { acceptRemote(await api({action:"login", role:"admin", pin:pin})); UI.loginErr = ""; UI.month = currentMonth(); }
+        catch(err){ UI.loginErr = err.message; }
+        renderApp();
       });
     }
   }
@@ -742,7 +722,8 @@
     var root = document.getElementById("app-root");
     var logoutBtn = root.querySelector('[data-action="logout"]');
     if(logoutBtn){
-      logoutBtn.addEventListener("click", function(){
+      logoutBtn.addEventListener("click", async function(){
+        try { acceptRemote(await api({action:"logout"})); } catch(err){ showToast("error", err.message); return; }
         UI.session = null;
         UI.loginErr = "";
         UI.phoneInput = "";
@@ -896,6 +877,7 @@
     persist();
   }
   function deleteEntry(id){
+    if(!confirm("এই লেনদেনটি মুছে ফেলবেন?")) return;
     STATE.entries = STATE.entries.filter(function(e){ return e.id !== id; });
     renderApp();
     persist();
@@ -944,13 +926,17 @@
     persist();
   }
   function deleteFlat(flatNo){
+    if(!confirm("এই ফ্ল্যাটটি মুছে ফেলবেন? আগের লেনদেন খতিয়ানে থাকবে।")) return;
     STATE.flats = STATE.flats.filter(function(f){ return f.flatNo !== flatNo; });
     renderApp();
     persist();
   }
 
-  loadLocal();
-  renderApp();
+  loadRemote();
+  setInterval(async function(){
+    if(!UI.session || UI.saving || UI.modal || document.hidden) return;
+    try { var result = await api(); if(UI.saving || UI.modal) return; if(result.revision !== serverRevision || !result.session){ acceptRemote(result); renderApp(); } } catch(ignore){}
+  }, 30000);
 </script>
 </body>
 </html>
