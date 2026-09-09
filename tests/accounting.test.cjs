@@ -9,6 +9,8 @@ test('bills create receivables, never cash; partial payments and old dues remain
  assert.equal(A.summary(s,'2026-01').received,0);assert.equal(A.totalDue(s,'2026-01'),4500);
  s.entries.push({id:'one',type:'income',category:A.SERVICE,month:'2026-01',date:'2026-02-03',flatNo:'1A',amount:1500});
  assert.equal(A.flatAccount(s,s.flats[0],'2026-01').due,3000);
+ assert.equal(A.history(s,s.flats[0],'2026-01')[0].status,'partial');
+ assert.equal(A.history(s,s.flats[0],'2026-01')[0].monthDue,2000);
  assert.equal(A.summary(s,'2026-01').received,1500);
  assert.equal(A.summary(s,'2026-02').opening,1700);
  s.entries.push({id:'two',type:'income',category:'অন্যান্য আয়',month:'2026-01',date:'2026-01-01',flatNo:'1A',amount:8000});
@@ -28,8 +30,15 @@ test('fractional currency is calculated to paisa precision',()=>{
  assert.equal(A.sum([{amount:0.1},{amount:0.2}]),0.3);
  const s=data();s.settings.openingBalance=0.3;s.entries=[{type:'cost',amount:0.1,month:'2026-01'}];assert.equal(A.summary(s,'2026-01').closing,0.2);
 });
-test('schema rejects duplicate phone numbers, impossible dates and duplicate bills; backups retain all records',()=>{
- const s=data();s.flats[0].mobile='01700000001';s.flats.push({...s.flats[0],flatNo:'1B'});assert.throws(()=>validate(s));s.flats.pop();
+test('paid, due, partial and advance states use bills and payments correctly',()=>{
+ const s=data();s.flats[0].openingDue=0;s.invoices=A.generateBills(s,'2026-01');let a=A.flatAccount(s,s.flats[0],'2026-01');assert.equal(A.paymentStatus(a),'due');
+ s.entries.push({id:'p1',type:'income',category:A.SERVICE,amount:1000,month:'2026-01',date:'2026-01-05',flatNo:'1A'});a=A.flatAccount(s,s.flats[0],'2026-01');assert.equal(A.paymentStatus(a),'partial');
+ s.entries.push({id:'p2',type:'income',category:A.SERVICE,amount:2500,month:'2026-01',date:'2026-01-06',flatNo:'1A'});a=A.flatAccount(s,s.flats[0],'2026-01');assert.equal(A.paymentStatus(a),'paid');
+ s.entries.push({id:'p3',type:'income',category:A.SERVICE,amount:500,month:'2026-01',date:'2026-01-07',flatNo:'1A'});a=A.flatAccount(s,s.flats[0],'2026-01');assert.equal(A.paymentStatus(a),'advance');
+});
+test('schema supports shared phone contacts and rejects impossible dates and duplicate bills',()=>{
+ const s=data();s.flats[0].mobile='01700000001';s.flats.push({...s.flats[0],flatNo:'1B'});assert.equal(validate(s).flats.length,2);s.flats.pop();
+ s.flats[0].contacts=[{name:'Local Owner',phone:'01700000001'},{name:'International Owner',phone:'+962 7 9000 0000'}];assert.equal(validate(s).flats[0].contacts[1].phone,'+962 7 9000 0000');
  s.invoices=A.generateBills(s,'2026-01');s.invoices.push({...s.invoices[0],id:'other'});assert.throws(()=>validate(s));s.invoices.pop();
  s.entries.push({id:'e',type:'income',category:A.SERVICE,amount:1,month:'2026-01',date:'2026-02-30',flatNo:'1A',note:'',payer:'',sourceId:''});assert.throws(()=>validate(s));s.entries[0].date='2026-02-28';
  const roundtrip=validate(JSON.parse(JSON.stringify(s)));assert.deepEqual(roundtrip,s);

@@ -8,7 +8,7 @@ test('language preference and core accounting translations',()=>{
  const context={localStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)},document:{documentElement:{lang:''},title:''}};
  context.globalThis=context;
  vm.runInNewContext(fs.readFileSync(require.resolve('../web/i18n.js'),'utf8'),context);
- assert.equal(context.I18n.language,'bn');
+ assert.equal(context.I18n.language,'en');
  assert.equal(context.I18n.setLanguage('en'),'en');
  assert.equal(context.I18n.t('ফ্ল্যাট মালিক'),'Flat Owner');
  assert.equal(context.I18n.t('বিদ্যুৎ বিল'),'Electricity Bill');

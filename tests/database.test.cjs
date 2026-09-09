@@ -30,6 +30,7 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.equal(login.body.session.role, 'admin');
   const adminCookie = cookie;
   const flats = Array.from({length:27}, (_,i) => ({flatNo:'A-'+(i+1), ownerName:'মালিক '+i, mobile:'017'+String(i).padStart(8,'0')}));
+  flats[1].contacts=[{name:'Shared owner',phone:flats[0].mobile},{name:'Second owner',phone:flats[1].mobile}];
   const entries = flats.map((f,i) => ({id:'entry-'+i,type:'income',category:'সার্ভিস চার্জ',amount:3000,month:'2026-09',flatNo:f.flatNo,note:''}));
   let saved = await request({action:'save',revision:0,state:{flats,entries}});
   assert.equal(saved.status, 200);
@@ -54,9 +55,14 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.equal((await request()).body.session, null);
   const resident = await request({action:'login',role:'resident',phone:flats[0].mobile});
   assert.equal(resident.body.session.role, 'resident');
-  assert.equal(resident.body.state.flats.length, 27);
-  assert.equal(resident.body.state.flats.filter(f=>f.mobile).length, 1);
+  assert.equal(resident.body.session.flats.length,2);
+  assert.equal(resident.body.state.flats.length,2);
+  assert.equal(resident.body.state.flats.filter(f=>f.mobile).length,1);
+  assert.ok(resident.body.state.flats.flatMap(f=>f.contacts).filter(c=>c.phone).every(c=>c.phone===flats[0].mobile));
   assert.equal(resident.body.state.entries.length, 27);
+  assert.ok(resident.body.state.entries.filter(e=>e.flatNo).every(e=>[flats[0].flatNo,flats[1].flatNo].includes(e.flatNo)));
+  assert.equal(resident.body.state.sources.length,0);
+  assert.equal(resident.body.state.reviewItems.length,0);
   assert.equal((await request({action:'save',revision:2,state:{flats:[],entries:[]}})).status, 403);
   cookie = adminCookie;
   const concurrent = await Promise.all([request({action:'save',revision:2,state:{flats,entries:[]}}), request({action:'save',revision:2,state:{flats,entries}})]);
@@ -69,4 +75,6 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.equal((await fetch(base+'/accounting.js')).status,200);
   assert.equal((await fetch(base+'/i18n.js')).status,200);
   assert.equal((await fetch(base+'/style.css')).status,200);
+  const css=await (await fetch(base+'/style.css')).text();
+  assert.match(css,/prefers-reduced-motion/);assert.match(css,/transition:transform \.2s/);
 });

@@ -22,6 +22,9 @@
       servicePaid:sum(receipts.filter(e=>e.month===month&&e.category===SERVICE)), garagePaid:sum(receipts.filter(e=>e.month===month&&e.category===GARAGE))};
   }
   function totalDue(state,month){return round(state.flats.reduce((total,flat)=>total+Math.max(0,flatAccount(state,flat,month).due),0));}
+  function paymentStatus(account){if(account.due<0)return 'advance';if(account.due===0)return 'paid';if(account.paid>0)return 'partial';return 'due';}
+  function lastPayment(state,flatNo){return state.entries.filter(e=>e.type==='income'&&e.flatNo===flatNo&&receivableCategories.includes(e.category)).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id))[0]||null;}
+  function history(state,flat,throughMonth){return months(state).filter(month=>month<=throughMonth).map(month=>{const account=flatAccount(state,flat,month),monthDue=round(account.billed-account.paid);return {month,...account,monthDue,status:paymentStatus({...account,due:monthDue}),lastPayment:account.receipts.sort((a,b)=>b.date.localeCompare(a.date))[0]||null};});}
   function generateBills(state,month){
     const result=[];
     for(const flat of state.flats.filter(f=>f.active!==false))for(const [category,rate] of [[SERVICE,flat.serviceRate??3000],[GARAGE,flat.garageRate||0]]){
@@ -30,5 +33,5 @@
     return result;
   }
   function reconciliation(state,report){const actual=summary(state,report.month);return {opening:actual.opening-report.reportedOpening,closing:actual.closing-report.reportedClosing,due:totalDue(state,report.month)-Object.values(report.dues||{}).reduce((a,b)=>a+b,0),expense:actual.expense-report.expenseTotal};}
-  return {SERVICE,GARAGE,OUTSIDE,receivableCategories,sum,months,summary,flatAccount,totalDue,generateBills,reconciliation};
+  return {SERVICE,GARAGE,OUTSIDE,receivableCategories,sum,months,summary,flatAccount,totalDue,paymentStatus,lastPayment,history,generateBills,reconciliation};
 });

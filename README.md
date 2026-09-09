@@ -1,6 +1,6 @@
 # Bijoy Tower
 
-Bengali and English flat-owner directory and monthly billing, collection, garage-rent and
+Bengali and simple-English flat-owner directory and monthly billing, collection, garage-rent and
 expense ledger for 27 flats. The cashier uses a PIN; registered owners use their
 phone number for read-only access. Other owners' phone numbers are hidden from
 resident API responses.
@@ -8,6 +8,18 @@ resident API responses.
 Use the **English / বাংলা** button on the login screen or in the signed-in header
 to change the interface language. The choice is remembered in that browser.
 Owner names and original source descriptions remain stored exactly as recorded.
+
+Each flat keeps its original `ownerName` and `mobile` fields for compatibility and
+also supports a `contacts` list. This allows several people to use one flat and one
+phone to open several linked flats. Bangladeshi and international phone numbers are
+accepted. Resident API responses include only the linked flats and anonymized
+building figures; admin review data and other owners' details remain private.
+
+The cashier payment form shows the selected flat's monthly charge, previous due,
+total due, last payment and status. New entries can store payment method, reference
+and receipt number. Owners have month-by-month payment history, year and status
+filters, printable receipts, clear paid/due/partial/advance states, and simple
+building income and expense charts. Expense pages support monthly and yearly views.
 
 Open https://bijoytower.vercel.app, use the cashier PIN provided in the private
 access file, and add real owners under the flat list. Firebase is no longer used.
