@@ -78,6 +78,7 @@ test('JSON database: complete authenticated lifecycle and durable storage', asyn
   assert.equal((await fetch(base+'/accounting.js')).status,200);
   assert.equal((await fetch(base+'/i18n.js')).status,200);
   assert.equal((await fetch(base+'/style.css')).status,200);
-  const css=await (await fetch(base+'/style.css')).text();
+  const css=await (await fetch(base+'/themes/Version_Green.css')).text();
   assert.match(css,/prefers-reduced-motion/);assert.match(css,/transition:transform \.2s/);
+  const themes=await (await fetch(base+'/themes/manifest.json')).json();assert.equal(themes.active,'Version_Green');
 });

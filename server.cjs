@@ -30,8 +30,9 @@ async function start({port = Number(process.env.PORT || 3000), dataDir = path.jo
         res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache'});
         return res.end(await fs.readFile(path.join(__dirname, 'index.html')));
       }
-      if(req.method==='GET' && ['/app.js','/style.css','/accounting.js','/i18n.js'].includes(url.pathname)){
-        res.writeHead(200, {'Content-Type':url.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8','Cache-Control':'no-cache'});
+      if(req.method==='GET' && ['/app.js','/style.css','/accounting.js','/i18n.js','/themes/Version_Green.css','/themes/manifest.json'].includes(url.pathname)){
+        const type=url.pathname.endsWith('.css')?'text/css; charset=utf-8':url.pathname.endsWith('.json')?'application/json; charset=utf-8':'text/javascript; charset=utf-8';
+        res.writeHead(200, {'Content-Type':type,'Cache-Control':'no-cache'});
         return res.end(await fs.readFile(path.join(__dirname,'web',url.pathname.slice(1))));
       }
       res.writeHead(404); res.end('Not found');

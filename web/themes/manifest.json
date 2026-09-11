@@ -1,0 +1,14 @@
+{
+  "active": "Version_Green",
+  "themes": [
+    {
+      "id": "Version_Green",
+      "name": "Version_Green",
+      "file": "/themes/Version_Green.css",
+      "colors": {
+        "background": "#050a12",
+        "accent": "#4bd69a"
+      }
+    }
+  ]
+}
